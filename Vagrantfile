@@ -12,14 +12,19 @@ Vagrant.configure("2") do |config|
 
   # Script de aprovisionamiento
   config.vm.provision "shell", inline: <<-SHELL
+    set -e
+
     # Actualizar el sistema
+    echo "Actualizando el sistema..."
     apt update -y && apt upgrade -y
 
     # Instalar Docker
+    echo "Instalando Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh
     bash get-docker.sh
 
     # Instalar Docker Compose
+    echo "Instalando Docker Compose..."
     mkdir -p /usr/local/lib/docker/cli-plugins/
     curl -SL https://github.com/docker/compose/releases/download/v2.3.3/docker-compose-linux-x86_64 \
       -o /usr/local/lib/docker/cli-plugins/docker-compose
@@ -30,9 +35,11 @@ Vagrant.configure("2") do |config|
     docker compose version || { echo "Error: Docker Compose no instalado correctamente."; exit 1; }
 
     # Crear la carpeta DockerFiles
+    echo "Creando carpeta DockerFiles..."
     mkdir -p /DockerFiles && chmod 755 /DockerFiles
 
     # Validar y copiar archivos
+    echo "Copiando archivos a DockerFiles..."
     if [ -f /vagrant/dockerfile ] && [ -f /vagrant/docker-compose.yaml ]; then
         cp /vagrant/dockerfile /DockerFiles/
         cp /vagrant/docker-compose.yaml /DockerFiles/
@@ -41,30 +48,44 @@ Vagrant.configure("2") do |config|
         exit 1
     fi
 
-    # Validar la existencia de la carpeta y cambiar de directorio
-    if [ -d /DockerFiles ]; then
-        cd /DockerFiles
-    else
-        echo "Error: La carpeta /DockerFiles no existe."
-        exit 1
-    fi
+    # Cambiar de directorio a DockerFiles
+    cd /DockerFiles
 
     # Construir la imagen de Docker
-    if [ -f dockerfile ]; then
-        docker build -t myjenkins-blueocean:2.479.1-1 .
-    else
-        echo "Error: dockerfile no encontrado en /DockerFiles."
-        exit 1
-    fi
+    echo "Construyendo imagen de Docker..."
+    docker build -t myjenkins-blueocean:2.479.1-1 .
 
     # Despliegue de contenedores usando Docker Compose
-    if [ -f docker-compose.yaml ]; then
-        docker compose up -d
+    echo "Desplegando contenedores con Docker Compose..."
+    docker compose up -d
+
+    # Esperar a que Jenkins se inicie
+    echo "Esperando a que Jenkins se inicialice..."
+    sleep 30
+
+    # Obtener IP pública
+    PUBLIC_IP=$(hostname -I | awk '{print $2}')
+
+    # Obtener contraseña inicial de Jenkins
+    echo "Obteniendo contraseña inicial de Jenkins..."
+    JENKINS_PASSWORD=$(docker exec jenkins-blueocean cat /var/jenkins_home/secrets/initialAdminPassword || echo "No se pudo obtener la contraseña de Jenkins.")
+
+    # Validar estado de Zabbix
+    echo "Validando estado de Zabbix..."
+    ZABBIX_STATUS=$(docker ps | grep zabbix-web-nginx-pgsql | awk '{print $NF}')
+    if [ "$ZABBIX_STATUS" != "" ]; then
+        ZABBIX_PORT="8084"
     else
-        echo "Error: docker-compose.yaml no encontrado en /DockerFiles."
-        exit 1
+        ZABBIX_PORT="No disponible (Zabbix no está corriendo)"
     fi
 
+    # Mostrar información final
+    echo "========================================="
     echo "Despliegue completado con éxito."
+    echo "IP Pública del Servidor: $PUBLIC_IP"
+    echo "Acceso a Jenkins: http://$PUBLIC_IP:8080"
+    echo "Contraseña Inicial de Jenkins: $JENKINS_PASSWORD"
+    echo "Acceso a Zabbix: http://$PUBLIC_IP:$ZABBIX_PORT"
+    echo "========================================="
   SHELL
 end
